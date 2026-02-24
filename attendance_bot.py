@@ -99,25 +99,21 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # Only respond if user types 'attendance'
+    # Only record attendance for the user who sends 'attendance'
     if message.content.strip().lower() == "attendance":
         now_dt = datetime.now(TIMEZONE)
         today = now_dt.date()
-        members = [m for m in message.guild.members if not m.bot]
-        response = f"Attendance Between 6 PM and 8 PM ({today})\n\n"
-        for member in members:
+        six_pm = TIMEZONE.localize(datetime.combine(today, time(18, 0, 0)))
+        eight_pm = TIMEZONE.localize(datetime.combine(today, time(20, 0, 0)))
+        if six_pm <= now_dt <= eight_pm:
             c.execute("""
-            SELECT present FROM attendance
-            WHERE user_id = ? AND date = ?
-            LIMIT 1
-            """, (str(member.id), today.strftime("%Y-%m-%d")))
-            record = c.fetchone()
-            if record and record[0] == 1:
-                status = "PRESENT"
-            else:
-                status = "ABSENT"
-            response += f"{member.name} - {status}\n"
-        await message.channel.send(response)
+            INSERT OR IGNORE INTO attendance (user_id, username, date, present)
+            VALUES (?, ?, ?, 1)
+            """, (str(message.author.id), str(message.author), today.strftime("%Y-%m-%d")))
+            conn.commit()
+            await message.channel.send(f"Attendance noted : {message.author.name}")
+        else:
+            await message.channel.send("Attendance can only be noted between 6 PM and 8 PM.")
     await bot.process_commands(message)
 
 # =========================
@@ -161,28 +157,16 @@ async def takeattendance(ctx):
 
     now = datetime.now(TIMEZONE)
     today = now.date()
-    six_pm = datetime.combine(today, time(18, 0, 0))
-    eight_pm = datetime.combine(today, time(20, 0, 0))
-    six_pm = TIMEZONE.localize(six_pm)
-    eight_pm = TIMEZONE.localize(eight_pm)
-
-    members = [m for m in ctx.guild.members if not m.bot]
-
-    response = f"Attendance Between 6 PM and 8 PM ({today})\n\n"
-
-    for member in members:
-        c.execute("""
-        SELECT present FROM attendance
-        WHERE user_id = ? AND date = ?
-        LIMIT 1
-        """, (str(member.id), today.strftime("%Y-%m-%d")))
-        record = c.fetchone()
-        if record and record[0] == 1:
-            status = "PRESENT"
-        else:
-            status = "ABSENT"
-        response += f"{member.name} - {status}\n"
-
+    response = f"Attendance Noted Members ({today})\n\n"
+    c.execute("""
+    SELECT username FROM attendance WHERE date = ? AND present = 1
+    """, (today.strftime("%Y-%m-%d"),))
+    records = c.fetchall()
+    if records:
+        for record in records:
+            response += f"{record[0]}\n"
+    else:
+        response += "No attendance noted yet."
     await ctx.send(response)
 
 # =========================
