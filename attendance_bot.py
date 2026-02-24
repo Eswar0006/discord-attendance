@@ -99,26 +99,25 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    now_dt = datetime.now(TIMEZONE)
-    now = now_dt.strftime("%Y-%m-%d %H:%M:%S")
-
-    c.execute("""
-    INSERT INTO activity (user_id, username, timestamp, activity_type)
-    VALUES (?, ?, ?, ?)
-    """, (str(message.author.id), str(message.author), now, "message"))
-    conn.commit()
-
-    # Mark attendance if within 6pm-8pm
-    today = now_dt.date()
-    six_pm = TIMEZONE.localize(datetime.combine(today, time(18, 0, 0)))
-    eight_pm = TIMEZONE.localize(datetime.combine(today, time(20, 0, 0)))
-    if six_pm <= now_dt <= eight_pm:
-        c.execute("""
-        INSERT OR IGNORE INTO attendance (user_id, username, date, present)
-        VALUES (?, ?, ?, 1)
-        """, (str(message.author.id), str(message.author), today.strftime("%Y-%m-%d")))
-        conn.commit()
-
+    # Only respond if user types 'attendance'
+    if message.content.strip().lower() == "attendance":
+        now_dt = datetime.now(TIMEZONE)
+        today = now_dt.date()
+        members = [m for m in message.guild.members if not m.bot]
+        response = f"Attendance Between 6 PM and 8 PM ({today})\n\n"
+        for member in members:
+            c.execute("""
+            SELECT present FROM attendance
+            WHERE user_id = ? AND date = ?
+            LIMIT 1
+            """, (str(member.id), today.strftime("%Y-%m-%d")))
+            record = c.fetchone()
+            if record and record[0] == 1:
+                status = "PRESENT"
+            else:
+                status = "ABSENT"
+            response += f"{member.name} - {status}\n"
+        await message.channel.send(response)
     await bot.process_commands(message)
 
 # =========================
