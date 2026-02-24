@@ -7,6 +7,7 @@ from datetime import datetime, date, time
 import pytz
 import asyncio
 
+print("BOT FILE LOADED SUCCESSFULLY")
 # =========================
 # CONFIGURATION
 # =========================
@@ -64,7 +65,7 @@ async def on_ready():
 # DATABASE SETUP
 # =========================
 
-conn = sqlite3.connect("attendance.db")
+conn = sqlite3.connect("attendance.db", check_same_thread=False)
 c = conn.cursor()
 
 
