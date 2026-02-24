@@ -1,24 +1,12 @@
-from flask import Flask
-from threading import Thread
+
 import os
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 import sqlite3
 from datetime import datetime, date, time
 import pytz
+import asyncio
 
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Bot is alive"
-
-def run():
-    app.run(host='0.0.0.0', port=8080)
-
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
 # =========================
 # CONFIGURATION
 # =========================
@@ -35,11 +23,50 @@ intents.guilds = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # =========================
+# BACKGROUND ATTENDANCE REFRESH
+# =========================
+
+@tasks.loop(minutes=5)
+async def refresh_attendance():
+    await bot.wait_until_ready()
+    guilds = bot.guilds
+    now_dt = datetime.now(TIMEZONE)
+    today = now_dt.date()
+    six_pm = TIMEZONE.localize(datetime.combine(today, time(18, 0, 0)))
+    eight_pm = TIMEZONE.localize(datetime.combine(today, time(20, 0, 0)))
+    if not (six_pm <= now_dt <= eight_pm):
+        return
+    for guild in guilds:
+        for member in guild.members:
+            if member.bot:
+                continue
+            # Check if user has activity in window
+            c.execute("""
+            SELECT 1 FROM activity
+            WHERE user_id = ?
+            AND timestamp >= ?
+            AND timestamp <= ?
+            LIMIT 1
+            """, (str(member.id), six_pm.strftime("%Y-%m-%d %H:%M:%S"), eight_pm.strftime("%Y-%m-%d %H:%M:%S")))
+            record = c.fetchone()
+            if record:
+                c.execute("""
+                INSERT OR IGNORE INTO attendance (user_id, username, date, present)
+                VALUES (?, ?, ?, 1)
+                """, (str(member.id), str(member), today.strftime("%Y-%m-%d")))
+                conn.commit()
+
+@bot.event
+async def on_ready():
+    refresh_attendance.start()
+
+# =========================
 # DATABASE SETUP
 # =========================
 
 conn = sqlite3.connect("attendance.db")
 c = conn.cursor()
+
 
 c.execute("""
 CREATE TABLE IF NOT EXISTS activity (
@@ -47,6 +74,17 @@ CREATE TABLE IF NOT EXISTS activity (
     username TEXT,
     timestamp TEXT,
     activity_type TEXT
+)
+""")
+
+# New attendance table
+c.execute("""
+CREATE TABLE IF NOT EXISTS attendance (
+    user_id TEXT,
+    username TEXT,
+    date TEXT,
+    present INTEGER,
+    PRIMARY KEY (user_id, date)
 )
 """)
 conn.commit()
@@ -60,14 +98,25 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    now = datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
+    now_dt = datetime.now(TIMEZONE)
+    now = now_dt.strftime("%Y-%m-%d %H:%M:%S")
 
     c.execute("""
     INSERT INTO activity (user_id, username, timestamp, activity_type)
     VALUES (?, ?, ?, ?)
     """, (str(message.author.id), str(message.author), now, "message"))
-
     conn.commit()
+
+    # Mark attendance if within 6pm-8pm
+    today = now_dt.date()
+    six_pm = TIMEZONE.localize(datetime.combine(today, time(18, 0, 0)))
+    eight_pm = TIMEZONE.localize(datetime.combine(today, time(20, 0, 0)))
+    if six_pm <= now_dt <= eight_pm:
+        c.execute("""
+        INSERT OR IGNORE INTO attendance (user_id, username, date, present)
+        VALUES (?, ?, ?, 1)
+        """, (str(message.author.id), str(message.author), today.strftime("%Y-%m-%d")))
+        conn.commit()
 
     await bot.process_commands(message)
 
@@ -82,15 +131,25 @@ async def on_voice_state_update(member, before, after):
 
     # If user joins voice channel
     if before.channel is None and after.channel is not None:
-
-        now = datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
+        now_dt = datetime.now(TIMEZONE)
+        now = now_dt.strftime("%Y-%m-%d %H:%M:%S")
 
         c.execute("""
         INSERT INTO activity (user_id, username, timestamp, activity_type)
         VALUES (?, ?, ?, ?)
         """, (str(member.id), str(member), now, "voice"))
-
         conn.commit()
+
+        # Mark attendance if within 6pm-8pm
+        today = now_dt.date()
+        six_pm = TIMEZONE.localize(datetime.combine(today, time(18, 0, 0)))
+        eight_pm = TIMEZONE.localize(datetime.combine(today, time(20, 0, 0)))
+        if six_pm <= now_dt <= eight_pm:
+            c.execute("""
+            INSERT OR IGNORE INTO attendance (user_id, username, date, present)
+            VALUES (?, ?, ?, 1)
+            """, (str(member.id), str(member), today.strftime("%Y-%m-%d")))
+            conn.commit()
 
 # =========================
 # ATTENDANCE AFTER 6 PM
@@ -109,23 +168,19 @@ async def takeattendance(ctx):
 
     members = [m for m in ctx.guild.members if not m.bot]
 
-    response = f"Attendance After 6 PM ({today})\n\n"
+    response = f"Attendance Between 6 PM and 8 PM ({today})\n\n"
 
     for member in members:
         c.execute("""
-        SELECT 1 FROM activity
-        WHERE user_id = ?
-        AND timestamp >= ?
+        SELECT present FROM attendance
+        WHERE user_id = ? AND date = ?
         LIMIT 1
-        """, (str(member.id), six_pm.strftime("%Y-%m-%d %H:%M:%S")))
-
+        """, (str(member.id), today.strftime("%Y-%m-%d")))
         record = c.fetchone()
-
-        if record:
+        if record and record[0] == 1:
             status = "PRESENT"
         else:
             status = "ABSENT"
-
         response += f"{member.name} - {status}\n"
 
     await ctx.send(response)
@@ -134,6 +189,4 @@ async def takeattendance(ctx):
 # RUN BOT
 # =========================
 
-keep_alive()
 bot.run(TOKEN)
-
