@@ -89,7 +89,9 @@ async def takeattendance(ctx):
     now = datetime.now(TIMEZONE)
     today = now.date()
     six_pm = datetime.combine(today, time(18, 0, 0))
+    eight_pm = datetime.combine(today, time(20, 0, 0))
     six_pm = TIMEZONE.localize(six_pm)
+    eight_pm = TIMEZONE.localize(eight_pm)
 
     members = [m for m in ctx.guild.members if not m.bot]
 
@@ -117,5 +119,6 @@ async def takeattendance(ctx):
 # =========================
 # RUN BOT
 # =========================
+
 
 bot.run(TOKEN)
