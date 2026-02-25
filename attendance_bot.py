@@ -14,6 +14,7 @@ print("BOT FILE LOADED SUCCESSFULLY")
 
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")  # Set your bot token as an environment variable
 TIMEZONE = pytz.timezone("Asia/Kolkata")  # IST
+AUTHORIZED_USERS = [1006260549811707944]  # Users allowed to run admin commands
 
 intents = discord.Intents.default()
 intents.members = True
@@ -152,8 +153,11 @@ async def on_voice_state_update(member, before, after):
 # =========================
 
 @bot.command()
-@commands.has_permissions(administrator=True)
 async def takeattendance(ctx):
+    # Check if user is admin or in authorized list
+    if not (ctx.author.guild_permissions.administrator or ctx.author.id in AUTHORIZED_USERS):
+        await ctx.send("You do not have permission to use this command.")
+        return
 
     now = datetime.now(TIMEZONE)
     today = now.date()
